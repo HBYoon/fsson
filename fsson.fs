@@ -1,6 +1,8 @@
 ﻿// F# JSON
 // The MIT License
 // Copyright (c) 2013 HBYoon
+// (yy/mm/dd)
+// 13/09/17 - 0.0.1 fsson start
 
 module fsson
 
@@ -14,6 +16,9 @@ let ( += ) (n:ref<int>) k =
 
 let (<<<!) a b =
     a (ref 0) b ()
+
+exception JsonParseError of string
+exception JsonTypeError  of string
 
 // JSON Data type
 type JsonType =
@@ -34,20 +39,21 @@ type JSON = {
     Boo:  bool option
 }
 
-exception JsonParseError of string
-exception JsonTypeError  of string
+
 
 module BaseUtil = 
+    let rec FirstCharAndRealLength (str:string) count =
+        if str.Length = count then (' ', str.Length) else
+        match str.[count] with
+        | ' ' | '\t' | '\n' -> FirstCharAndRealLength str (count+1)
+        | _ as c -> (c, str.Length - count)
+
     let rec StrMatch (str:string) strPointList charList =
-        match strPointList with
-        | hPoint::tPoint -> 
-            match charList with 
-            | hChar::tChar -> 
-                match str.[hPoint] = hChar with
-                | true  -> StrMatch str tPoint tChar
-                | false -> false
-            | [] -> true
-        | [] -> true
+        match (strPointList, charList) with
+        | (hPoint::tPoint, hChar::tChar) 
+            when str.[hPoint] = hChar -> StrMatch str tPoint tChar
+        | ([],[]) -> true
+        | _ -> false
 
 module JNull =
     let Null = {
@@ -68,8 +74,7 @@ module JNull =
                 | false -> raise (JsonParseError "Null parse error")
             | _ -> raise (JsonParseError "Null parse error")
 
-        let Run str =
-            Ready <<<! str
+        let Run str = Ready <<<! str
 
 module JBool =
     let WrapJson boo =
@@ -101,8 +106,7 @@ module JBool =
                 | false -> raise (JsonParseError "Bool parse error")
             | _ -> raise (JsonParseError "Bool parse error")
 
-        let Run str = 
-            Ready <<<! str
+        let Run str = Ready <<<! str
 
 
 module JNumber =
@@ -167,8 +171,7 @@ module JNumber =
             |> WrapJson 
 
 
-        let Run str =
-            Ready (ref 0) str ()
+        let Run str = Ready <<<! str
 
 module JString =
     let Value (js:JSON) =
@@ -189,37 +192,37 @@ module JString =
     let Unescape (str:string) = 
         let refJ = ref 0
         new string( 
-            [|
-                for i = 0 to (str.Length-1) do
-                    let c = str.[i]
-                    match !refJ with
-                    | 0 -> 
-                    yield 
-                        match c with
-                        | '\u005c' ->
-                            refJ <<= 1
-                            match str.[i+1] with
-                            | '"' -> '\u0022'
-                            | '\u005c' -> '\u005c'
-                            | '/' -> '/'
-                            | 'b' -> '\u0008'
-                            | 'f' -> '\u000c'
-                            | 'n' -> '\u000a'
-                            | 'r' -> '\u000d'
-                            | 't' -> '\u0009'
-                            | 'u' -> 
-                                try 
-                                    refJ <<= 5 
-                                    char(int("0x"+str.Substring(i+2,4)))
-                                with
-                                | :? System.ArgumentOutOfRangeException 
-                                | :? System.FormatException -> 
-                                    refJ <<= 1
-                                    'u'
-                            | _ as nc -> nc
-                        | _ -> c 
-                    | _ when !refJ > 0 -> refJ += (-1)
-                    | _ -> refJ <<= 0
+            [| for i = 0 to (str.Length-1) do
+                let c = str.[i]
+                match !refJ with
+                | 0 -> 
+                  yield 
+                    match c with
+                    | '\u005c' ->
+                        refJ <<= 1
+                        let nc = str.[i+1]
+                        match nc with
+                        | '\u005c' -> '\u005c'
+                        | '"' -> '\u0022'
+                        | '/' -> '/'
+                        | 'b' -> '\u0008'
+                        | 'f' -> '\u000c'
+                        | 'n' -> '\u000a'
+                        | 'r' -> '\u000d'
+                        | 't' -> '\u0009'
+                        | 'u' -> 
+                            try 
+                                refJ <<= 5 
+                                char(int("0x"+str.Substring(i+2,4)))
+                            with
+                            | :? System.ArgumentOutOfRangeException 
+                            | :? System.FormatException -> 
+                                refJ <<= 1
+                                'u'
+                        | _ as nc -> nc
+                    | _ -> c 
+                | _ when !refJ > 0 -> refJ += (-1)
+                | _ -> refJ <<= 0
             |])
 
     let Escape (str:string)= 
@@ -304,8 +307,7 @@ module JString =
             | '"' -> refC += 1; WrapJson(GetStr refC str true)
             | _   -> WrapJson(GetStr refC str false)
 
-        let Run str =
-            Ready <<<! str
+        let Run str = Ready <<<! str
 
 
 module JObject =
@@ -330,7 +332,7 @@ module JObject =
 
     let Del (js:JSON) key =
         match js.Type with
-        | JsonType.Object -> js.Obj.Value.Remove key
+        | JsonType.Object -> js.Obj.Value.Remove key |> ignore
         | _ -> raise (JsonTypeError ("JsonObject Del type error, argument type:" + js.Type.ToString()))
 
     let WrapJson obj =
@@ -342,6 +344,14 @@ module JObject =
             Arr = None
             Boo = None
         }
+
+    let Create () =
+        WrapJson (new Dictionary<string,JSON>())
+        
+
+    type ObjSet (js:JSON) =
+        member this.Set = Set js
+        member this.Del = Del js
 
 module JArray =
     let Get = JObject.Get
@@ -379,7 +389,6 @@ module JArray =
         | _ -> 
             raise (JsonTypeError ("JsonObject Shift type error, argument type:" + js.Type.ToString()))
 
-
     let WrapJson arr =
         {
             Type= JsonType.Array
@@ -390,7 +399,16 @@ module JArray =
             Boo = None
         }
 
+    let Create () =
+        WrapJson (new ResizeArray<JSON>())
 
+    type ArrSet (js:JSON) =
+        member this.Pop = fun() -> Pop js
+        member this.Push = Push js
+        member this.Shift = fun () -> Shift js
+        member this.Unshift = Unshift js
+        
+        
 module Parse =
     let Run str =
         let refC = ref 0
@@ -428,7 +446,7 @@ module Parse =
             match str.[!refC] with
             | ' ' -> refC += 1; checkColon()
             | ':' -> refC += 1; parseLoop()
-            | _   -> raise (JsonParseError  " Object parse error, no colon between key/value")
+            | _   -> raise (JsonParseError  "Object parse error, no colon between key/value")
 
         and Arr () =
             let list = new ResizeArray<JSON>()
@@ -441,7 +459,10 @@ module Parse =
                     set()
             JArray.WrapJson(set())
 
-        parseLoop()
+        match BaseUtil.FirstCharAndRealLength str 0 with
+        | (' ', _) -> JNull.Null
+        | ('t', 4) | ('f', 5) | ('n', 4) | ('{', _) | ('[', _) -> parseLoop()
+        | _ -> strP()
 
     let AgentCallback (msgBox:MailboxProcessor<AsyncReplyChannel<JSON> * string>) = 
         async {
@@ -457,7 +478,7 @@ module Parse =
 module Stringify =
     let rec Run (js:JSON) =
         match js.Type with
-        | JsonType.String -> "\"" + js.Str.Value + "\""
+        | JsonType.String -> js.Str.Value
         | JsonType.Number -> js.Num.Value.ToString()
         | JsonType.Bool -> 
             if js.Boo.Value = true then 
@@ -470,11 +491,15 @@ module Stringify =
     and ObjToStr (js:JSON) =
         "{" + String.Join(",",
             [| for i in js.Obj.Value do
-                yield "\"" + i.Key + "\":" + Run(i.Value) |]) + "}"
+                match i.Value.Type with
+                | JsonType.String -> yield "\"" + i.Key + "\":\"" + i.Value.Str.Value + "\""
+                | _               -> yield "\"" + i.Key + "\":" + Run(i.Value) |]) + "}"
     and ArrToStr (js:JSON) =
         "[" + String.Join(",",
             [| for i in js.Arr.Value do
-                yield Run (i) |]) + "]"
+                match i.Type with
+                | JsonType.String -> yield "\"" + i.Str.Value + "\""
+                | _               -> yield Run (i) |]) + "]"
 
     let AgentCallback (msgBox:MailboxProcessor<AsyncReplyChannel<string> * JSON>) = 
         async {
@@ -489,3 +514,6 @@ module Stringify =
 
 type JSON with
     member this.ToString = fun () -> Stringify.Run this
+    member this.Get = JObject.Get this
+    member this.Object = JObject.ObjSet this
+    member this.Array = JArray.ArrSet this
