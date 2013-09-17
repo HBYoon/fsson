@@ -26,7 +26,7 @@ type JSON = {
 Base Structure
 ---
 ###Value Type module
----
+
 Each module have a typed string parser.
 ```
 JNull
@@ -34,27 +34,31 @@ JBool
 JString
 JNumber
 ```
+
 ###Object Type module
----
+
 Each module have a data handling method for own type.
 ```
 JObject
 JArray
 ```
+
 ###Tool module
----
+
 ```
 Parse
 Stringify
 ```
+
 ###JSON member
----
+
 ```
 ToString
 Get
 Object
 Array
 ```
+
 How to use
 ---
 ```
